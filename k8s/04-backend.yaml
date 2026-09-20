@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-secret
+  namespace: machinesense
+type: Opaque
+stringData:
+  JWT_SECRET: machinesense_super_secret_key_change_me_1234567890
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: machinesense
+data:
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: machinesense
+  DB_USER: machinesense
+  DB_PASSWORD: machinesense
+  ML_SERVICE_URL: http://ml-service:5000
+  CORS_ORIGINS: "http://localhost:3000"
+  JWT_EXPIRATION_MS: "86400000"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: machinesense
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: backend }
+  template:
+    metadata:
+      labels: { app: backend }
+    spec:
+      containers:
+        - name: backend
+          image: machinesense/backend:latest
+          ports: [{ containerPort: 8080 }]
+          envFrom:
+            - configMapRef: { name: backend-config }
+            - secretRef: { name: backend-secret }
+          resources:
+            requests: { cpu: "250m", memory: "384Mi" }
+            limits: { cpu: "750m", memory: "768Mi" }
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8080 }
+            initialDelaySeconds: 25
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8080 }
+            initialDelaySeconds: 40
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: machinesense
+spec:
+  selector: { app: backend }
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-hpa
+  namespace: machinesense
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

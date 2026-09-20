@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sensor-simulator
+  namespace: machinesense
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: sensor-simulator }
+  template:
+    metadata:
+      labels: { app: sensor-simulator }
+    spec:
+      containers:
+        - name: sensor-simulator
+          image: machinesense/sensor-simulator:latest
+          env:
+            - name: BACKEND_URL
+              value: http://backend:8080
+            - name: INTERVAL
+              value: "4"
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "150m", memory: "128Mi" }

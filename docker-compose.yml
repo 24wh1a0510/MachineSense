@@ -1,0 +1,89 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: machinesense-postgres
+    environment:
+      POSTGRES_DB: machinesense
+      POSTGRES_USER: machinesense
+      POSTGRES_PASSWORD: machinesense
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U machinesense -d machinesense"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [machinesense-net]
+
+  ml-service:
+    build: ./ml-service
+    container_name: machinesense-ml
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [machinesense-net]
+
+  backend:
+    build: ./backend
+    container_name: machinesense-backend
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: machinesense
+      DB_USER: machinesense
+      DB_PASSWORD: machinesense
+      ML_SERVICE_URL: http://ml-service:5000
+      JWT_SECRET: machinesense_super_secret_key_change_me_1234567890
+      CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ml-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [machinesense-net]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:8080
+    container_name: machinesense-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks: [machinesense-net]
+
+  sensor-simulator:
+    build: ./sensor-simulator
+    container_name: machinesense-simulator
+    environment:
+      BACKEND_URL: http://backend:8080
+      INTERVAL: "4"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [machinesense-net]
+
+volumes:
+  pgdata:
+
+networks:
+  machinesense-net:
+    driver: bridge
