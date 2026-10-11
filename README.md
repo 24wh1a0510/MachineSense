@@ -1,42 +1,121 @@
 # MachineSense — Intelligent Industrial Asset Monitoring
 
-A production-style predictive-maintenance platform: virtual industrial machines stream live
-sensor data, an ML model scores failure risk in real time, and the system automatically opens
-maintenance tickets when a machine drifts into WARNING or CRITICAL territory.
+> A production-grade predictive maintenance platform. Industrial machines stream live sensor data, an ML model scores failure risk in real time, and the system automatically opens maintenance tickets and sends phone alerts when a machine drifts into WARNING or CRITICAL territory.
 
 ```
-Sensor Simulator → Spring Boot → Python ML Prediction → PostgreSQL → React Dashboard
-```
-
-## Stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | React 18 + Vite, Recharts |
-| Backend | Spring Boot 3 (Java 17), Spring Security + JWT |
-| ML | Python, Scikit-learn, XGBoost, Flask |
-| Database | PostgreSQL 16 |
-| Simulator | Python |
-| Containers | Docker + Kubernetes |
-
-## Project structure
-
-```
-machinesense/
-├── frontend/           React dashboard (Vite)
-├── backend/             Spring Boot REST API
-├── ml-service/           Model training + Flask prediction API
-├── sensor-simulator/     Generates live sensor readings
-├── database/             PostgreSQL schema + seed data
-├── k8s/                  Kubernetes manifests
-└── docker-compose.yml    Local multi-service orchestration
+IoT Sensors / Simulator → Spring Boot API → Python ML Service → PostgreSQL → React Dashboard → Telegram Alerts
 ```
 
 ---
 
-## 1. Run everything with Docker Compose (recommended)
+## The Problem
 
-Prerequisites: Docker + Docker Compose.
+Unplanned industrial downtime costs manufacturers an average of **$260,000 per hour**. Traditional maintenance is either reactive (fix after failure) or schedule-based (service every N months regardless of condition). Both are wasteful or dangerous.
+
+**MachineSense enables predictive maintenance** — the system detects degradation before failure occurs, automatically raises a ticket, and instantly notifies the maintenance team on their phones.
+
+---
+
+## Stack
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| Frontend | React 18 + Vite + Recharts | Live dashboard, ticket management |
+| Backend | Spring Boot 3, Java 17, Spring Security + JWT | REST API, business logic, security |
+| ML Service | Python, XGBoost, Scikit-learn, Flask | Failure prediction engine |
+| Database | PostgreSQL 16 | Persistent storage for all data |
+| Alerts | Telegram Bot API | Instant phone notifications |
+| Simulator | Python | Mimics IoT sensors on 5 machines |
+| Containers | Docker + Docker Compose | Local orchestration |
+| Cloud | Kubernetes | Production deployment manifests |
+
+---
+
+## Architecture
+
+```
+┌─────────────────┐     POST /api/sensors/ingest      ┌──────────────────────┐
+│  Sensor Layer   │ ─────────────────────────────────▶ │   Spring Boot API    │
+│  (simulator or  │                                    │                      │
+│  real hardware) │                                    │  • JWT Auth          │
+└─────────────────┘                                    │  • Sensor Ingestion  │
+                                                       │  • ML Client         │
+┌─────────────────┐     GET /api/...                   │  • Ticket Service    │
+│ React Dashboard │ ◀───────────────────────────────── │  • Telegram Alerts   │
+│                 │     polls every 5 seconds          └──────────┬───────────┘
+│ • Factory View  │                                               │
+│ • Live Charts   │                                    ┌──────────▼───────────┐
+│ • Tickets       │                                    │   ML Service (Flask) │
+│ • Demo Controls │                                    │                      │
+└─────────────────┘                                    │  • XGBoost           │
+                                                       │  • Random Forest     │
+┌─────────────────┐                                    │  • Health Score      │
+│    Telegram     │ ◀── alert on WARNING/CRITICAL       └──────────┬───────────┘
+│  (phone alert)  │                                               │
+└─────────────────┘                                    ┌──────────▼───────────┐
+                                                       │  PostgreSQL Database  │
+                                                       │                      │
+                                                       │  • machines          │
+                                                       │  • sensor_readings   │
+                                                       │  • predictions       │
+                                                       │  • maintenance_tickets│
+                                                       │  • users             │
+                                                       └──────────────────────┘
+```
+
+---
+
+## Project Structure
+
+```
+machinesense/
+├── backend/                        Spring Boot REST API (Java 17)
+│   ├── src/main/java/com/machinesense/
+│   │   ├── controller/             HTTP endpoints (Auth, Sensors, Tickets, Dashboard, Demo)
+│   │   ├── service/                Business logic (Ingestion, ML Client, Telegram, Tickets)
+│   │   ├── entity/                 JPA database entities
+│   │   ├── repository/             Spring Data JPA repositories
+│   │   ├── dto/                    Request/Response data classes
+│   │   ├── config/                 Security, CORS configuration
+│   │   └── security/               JWT filter, UserDetailsService
+│   └── src/main/resources/
+│       └── application.yml         Configuration (DB, JWT, ML URL, Telegram)
+│
+├── frontend/                       React 18 + Vite dashboard
+│   └── src/
+│       ├── pages/                  Dashboard, MachineDetail, Tickets, Login, Register
+│       ├── components/             MachineCard, Layout, statusUtils
+│       └── api/                    Axios client, AuthContext
+│
+├── ml-service/                     Python ML prediction engine
+│   ├── train.py                    Model training (XGBoost + Random Forest)
+│   ├── predict_api.py              Flask prediction API
+│   ├── data_loader.py              Loads AI4I dataset or generates synthetic fallback
+│   └── models/                     Saved trained models
+│
+├── sensor-simulator/               Python IoT sensor simulator
+│   └── simulator.py                Posts readings for 5 machines every 4 seconds
+│
+├── database/
+│   └── schema.sql                  PostgreSQL tables + seed data (5 machines, 2 users)
+│
+├── k8s/                            Kubernetes manifests
+│   ├── 00-namespace.yaml
+│   ├── 01-postgres-configmap-secret.yaml
+│   ├── 02-postgres.yaml
+│   ├── 03-ml-service.yaml
+│   ├── 04-backend.yaml
+│   ├── 05-frontend.yaml
+│   └── 07-ingress.yaml
+│
+└── docker-compose.yml              Full local orchestration
+```
+
+---
+
+## Quick Start — Docker Compose (Recommended)
+
+**Prerequisites:** Docker Desktop installed and running.
 
 ```bash
 git clone <this-repo>
@@ -44,69 +123,234 @@ cd machinesense
 docker compose up --build
 ```
 
-This will:
-1. Start PostgreSQL and load `database/schema.sql` (creates tables + seeds 5 demo machines and
-   2 demo users).
-2. Build the ML service image, **train the model during the image build**, and start the Flask
-   prediction API on port 5000.
-3. Build and start the Spring Boot backend on port 8080.
-4. Build and start the React frontend on port 3000.
-5. Start the sensor simulator, which begins posting readings for 5 virtual machines every 4
-   seconds.
-
 Open **http://localhost:3000** and sign in:
 
 | Username | Password | Role |
 |---|---|---|
-| `admin` | `password123` | Admin |
+| `admin` | `password123` | Admin — full access |
 | `tech1` | `password123` | Maintenance Technician |
 
-Within a few seconds of the simulator running you'll see live health scores update on the
-Factory Overview page, and maintenance tickets appear automatically as machines drift into
-WARNING/CRITICAL risk.
+Within 30 seconds you will see live health scores updating on the Factory Overview page. Maintenance tickets appear automatically as machines drift into WARNING or CRITICAL risk.
 
-To stop: `docker compose down` (add `-v` to also wipe the Postgres volume).
+**To stop:**
+```bash
+docker compose down          # stops containers, keeps database
+docker compose down -v       # stops containers + wipes database
+```
 
 ---
 
-## 2. Run components individually (development mode)
+## Telegram Phone Alerts (Optional but Recommended for Demo)
+
+MachineSense can send instant phone alerts via a Telegram bot whenever a machine hits WARNING or CRITICAL risk.
+
+### Setup (5 minutes)
+
+1. Open Telegram → search **@BotFather** → send `/newbot`
+2. Follow prompts → BotFather gives you a **bot token** (format: `1234567890:AAxxxxxxx`)
+3. Search for your new bot in Telegram → press **Start**
+4. Visit this URL in your browser (replace YOUR_TOKEN):
+   ```
+   https://api.telegram.org/botYOUR_TOKEN/getUpdates
+   ```
+5. Copy the `chat.id` number from the response — that is your **chat ID**
+
+### Configure
+
+Create a `.env` file in the project root:
+
+```env
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+```
+
+Then start with:
+```bash
+docker compose up -d
+```
+
+Docker Compose automatically reads the `.env` file. No rebuild needed.
+
+### What the alert looks like on your phone
+
+```
+🟡 MachineSense Alert 🟡
+
+🏭 Machine: CNC Machine (M-001)
+📊 Risk level: WARNING
+❤️ Health score: 62/100
+📈 Failure probability: 35.0%
+⚠️ Predicted failure: Heat Dissipation
+
+👷 A maintenance ticket has been automatically created.
+Please inspect the machine immediately.
+```
+
+---
+
+## Demo Controls
+
+The dashboard includes built-in demo controls for presentations:
+
+- **📱 Send Telegram Alert** — sends a test alert to your phone instantly, no degradation needed
+- **⚡ Simulate Degradation** (on any machine detail page) — injects a high-risk sensor reading, triggers the full pipeline: ML prediction → ticket creation → Telegram alert → live chart update
+
+---
+
+## Machine Learning
+
+### Dataset
+Trained on the **AI4I 2020 Predictive Maintenance Dataset** from the UCI Machine Learning Repository — collected from real CNC machines.
+
+Features used: Air Temperature, Process Temperature, Rotational Speed, Torque, Tool Wear, Machine Type.
+
+If the dataset CSV is not present at `ml-service/data/ai4i2020.csv`, `train.py` automatically generates a synthetic fallback dataset using the same physically-motivated failure rules.
+
+### Models
+
+| Model | Algorithm | Output |
+|---|---|---|
+| Failure classifier | XGBoost | Failure probability (0.0 – 1.0) |
+| Failure type classifier | Random Forest | Failure type (Heat Dissipation, Tool Wear, Power, Overstrain, Random) |
+
+### Risk Levels
+
+| Risk Level | Failure Probability | Action |
+|---|---|---|
+| HEALTHY | < 15% | No action — continue monitoring |
+| WARNING | 15% – 50% | Schedule inspection within current shift |
+| CRITICAL | > 50% | Stop machine, dispatch technician immediately |
+
+### Health Score
+Non-linear transform of failure probability to a 0–100 scale. 100 = perfect health, 0 = imminent failure.
+
+---
+
+## Data Flow — Step by Step
+
+```
+1. Sensor simulator posts a reading every 4 seconds:
+   POST /api/sensors/ingest
+   { machineCode, machineType, airTemperature, processTemperature,
+     rotationalSpeed, torque, toolWear }
+
+2. Backend saves the reading to sensor_readings table
+
+3. Backend calls ML service:
+   POST http://ml-service:5000/predict
+   ← { failureProbability, healthScore, riskLevel, predictedFailureType }
+
+4. Backend saves prediction to predictions table
+
+5. If riskLevel is WARNING or CRITICAL and no open ticket exists:
+   → Creates maintenance ticket in maintenance_tickets table
+   → Sends Telegram alert to maintenance team's phones
+
+6. React dashboard polls /api/machines, /api/predictions, /api/sensors every 5 seconds
+   → Machine cards update live with new health scores and risk status
+```
+
+---
+
+## API Reference
+
+Base URL: `http://localhost:8080`
+
+All endpoints except `/api/auth/**`, `/api/sensors/ingest`, and `/actuator/**` require:
+```
+Authorization: Bearer <jwt_token>
+```
+
+### Authentication
+| Method | Path | Body | Response |
+|---|---|---|---|
+| POST | `/api/auth/login` | `{ username, password }` | `{ token, username, role, fullName }` |
+
+### Machines
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/machines` | Any | List all machines |
+| GET | `/api/machines/{id}` | Any | Machine by ID |
+| POST | `/api/machines/register` | Admin | Register a new machine |
+| DELETE | `/api/machines/{id}/delete` | Admin | Remove a machine |
+
+### Sensors
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/sensors/ingest` | Public | Post a sensor reading — triggers full pipeline |
+| GET | `/api/sensors/machine/{id}?limit=50` | Any | Recent readings for a machine |
+
+### Predictions
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/predictions/machine/{id}/latest` | Any | Most recent prediction |
+| GET | `/api/predictions/machine/{id}?limit=50` | Any | Prediction history |
+
+### Maintenance Tickets
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/tickets` | Any | All tickets |
+| GET | `/api/tickets/machine/{id}` | Any | Tickets for a machine |
+| GET | `/api/tickets/status/{status}` | Any | Filter by OPEN / ASSIGNED / IN_PROGRESS / COMPLETED |
+| PATCH | `/api/tickets/{id}` | Any | Update status, assign technician, add notes |
+| GET | `/api/tickets/{id}/history` | Any | Full audit trail |
+
+### Dashboard
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/dashboard/summary` | Any | Total machines, health counts, active tickets, factory health % |
+
+### Demo
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/demo/trigger-alert/{machineId}` | Any | Send a test Telegram alert for demo purposes |
+
+### ML Service (internal, port 5000)
+| Method | Path | Description |
+|---|---|---|
+| POST | `/predict` | Run prediction on sensor values |
+| GET | `/health` | Liveness check |
+| GET | `/model-info` | Model features, metrics, failure types |
+
+---
+
+## Running Services Individually (Development)
 
 ### Database
 ```bash
-docker run --name ms-postgres -e POSTGRES_DB=machinesense -e POSTGRES_USER=machinesense \
-  -e POSTGRES_PASSWORD=machinesense -p 5432:5432 -d postgres:16-alpine
+docker run --name ms-postgres \
+  -e POSTGRES_DB=machinesense \
+  -e POSTGRES_USER=machinesense \
+  -e POSTGRES_PASSWORD=machinesense \
+  -p 5432:5432 -d postgres:16-alpine
+
 psql -h localhost -U machinesense -d machinesense -f database/schema.sql
 ```
 
-### ML service
+### ML Service
 ```bash
 cd ml-service
-python -m venv venv && source venv/bin/activate
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-python train.py          # trains model, saves to ml-service/models/
-python predict_api.py    # serves on http://localhost:5000
+python train.py         # trains and saves models to ml-service/models/
+python predict_api.py   # starts Flask API on http://localhost:5000
 ```
-To train on the **real AI4I 2020 dataset** instead of the synthetic fallback, download
-`ai4i2020.csv` from the UCI repository and place it at `ml-service/data/ai4i2020.csv`, then
-re-run `python train.py`.
 
 ### Backend
 ```bash
 cd backend
 mvn spring-boot:run
-# or: mvn clean package && java -jar target/machinesense-backend.jar
+# Needs DB_HOST, ML_SERVICE_URL env vars if not using defaults in application.yml
 ```
-Set `DB_HOST`, `ML_SERVICE_URL` etc. via environment variables if not using the defaults in
-`application.yml`.
 
 ### Frontend
 ```bash
 cd frontend
 npm install
-npm run dev   # http://localhost:3000, proxies API calls to http://localhost:8080
+npm run dev   # http://localhost:3000
 ```
 
-### Sensor simulator
+### Sensor Simulator
 ```bash
 cd sensor-simulator
 pip install -r requirements.txt
@@ -115,14 +359,12 @@ python simulator.py --backend http://localhost:8080 --interval 4
 
 ---
 
-## 3. Run on Kubernetes
+## Kubernetes Deployment
 
-Prerequisites: a running cluster (minikube, kind, etc.), `kubectl`, and images pushed to a
-registry your cluster can pull from (or built directly into the cluster's Docker daemon, e.g.
-`eval $(minikube docker-env)`).
+Prerequisites: A running cluster (minikube, kind, EKS, GKE, etc.) with `kubectl` configured.
 
 ```bash
-# Build images (tag to match k8s manifests, or push to your registry and update the image: fields)
+# Build and tag images
 docker build -t machinesense/backend:latest ./backend
 docker build -t machinesense/ml-service:latest ./ml-service
 docker build -t machinesense/frontend:latest ./frontend
@@ -131,110 +373,46 @@ docker build -t machinesense/sensor-simulator:latest ./sensor-simulator
 # Apply manifests
 kubectl apply -f k8s/00-namespace.yaml
 kubectl create configmap postgres-init-schema \
-  --from-file=schema.sql=database/schema.sql -n machinesense --dry-run=client -o yaml \
-  | kubectl apply -f -
+  --from-file=schema.sql=database/schema.sql \
+  -n machinesense --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f k8s/
-```
 
-Check status:
-```bash
+# Check status
 kubectl get pods -n machinesense
 kubectl get svc -n machinesense
 ```
 
-Access the app via the `frontend` NodePort service (default `30080`) or through the provided
-Ingress (`k8s/07-ingress.yaml`) if an ingress controller is installed.
+### What the Kubernetes manifests include
 
-The manifests include: Deployments with readiness/liveness probes for every service,
-a Postgres StatefulSet-style Deployment backed by a PersistentVolumeClaim, ConfigMaps/Secrets
-for configuration, and HorizontalPodAutoscalers for the backend and ML service.
+| Manifest | What it does |
+|---|---|
+| `00-namespace.yaml` | Isolates all resources in `machinesense` namespace |
+| `01-postgres-configmap-secret.yaml` | DB credentials as Kubernetes Secrets |
+| `02-postgres.yaml` | Postgres Deployment + PersistentVolumeClaim |
+| `03-ml-service.yaml` | ML Flask API Deployment + ClusterIP Service |
+| `04-backend.yaml` | Spring Boot Deployment + Service + HPA |
+| `05-frontend.yaml` | React frontend Deployment + NodePort Service |
+| `07-ingress.yaml` | Ingress routing for external access |
 
----
-
-## API reference (Spring Boot backend, base URL `http://localhost:8080`)
-
-### Auth
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/auth/login` | `{ username, password }` → `{ token, username, role, fullName }` |
-
-All endpoints below (except `/api/auth/**`, `/api/sensors/ingest`, `/actuator/**`) require
-`Authorization: Bearer <token>`.
-
-### Machines
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/machines` | List all machines |
-| GET | `/api/machines/{id}` | Machine by ID |
-| GET | `/api/machines/code/{code}` | Machine by code (e.g. `M-001`) |
-| POST | `/api/machines/register` | Admin only — register a new machine |
-| DELETE | `/api/machines/{id}/delete` | Admin only |
-
-### Sensors
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/sensors/ingest` | Public — simulator posts a reading here; triggers ML prediction + auto-ticketing |
-| GET | `/api/sensors/machine/{id}?limit=50` | Recent readings for a machine |
-
-### Predictions
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/predictions/machine/{id}?limit=50` | Prediction history |
-| GET | `/api/predictions/machine/{id}/latest` | Most recent prediction |
-
-### Maintenance tickets
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/tickets` | All tickets |
-| GET | `/api/tickets/machine/{id}` | Tickets for a machine |
-| GET | `/api/tickets/status/{status}` | Filter by status |
-| GET | `/api/tickets/technician/{userId}` | Tickets assigned to a technician |
-| PATCH | `/api/tickets/{id}` | `{ status?, assignedToId?, notes? }` — update status/assignment |
-| GET | `/api/tickets/{id}/history` | Audit trail for a ticket |
-
-### Dashboard
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/dashboard/summary` | Totals, health counts, active tickets, overall factory health |
-
-### ML service (`http://localhost:5000`, called internally by the backend)
-| Method | Path | Description |
-|---|---|---|
-| POST | `/predict` | `{ machineId, machineType, airTemperature, processTemperature, rotationalSpeed, torque, toolWear }` → `{ failureProbability, healthScore, riskLevel, predictedFailureType }` |
-| GET | `/health` | Liveness/model-loaded check |
-| GET | `/model-info` | Feature list, training metrics, supported failure types |
+All Deployments include **readiness and liveness probes** so Kubernetes knows when each service is actually ready and automatically restarts unhealthy pods.
 
 ---
 
-## Machine learning notes
+## Default Credentials
 
-- Trained on the **AI4I 2020 Predictive Maintenance Dataset** schema (Air/Process temperature,
-  Rotational speed, Torque, Tool wear, Type). If the real CSV isn't present, `train.py` falls
-  back to a synthetic dataset generated with the same physically-motivated failure rules (tool
-  wear, heat dissipation, power, overstrain, random failure) so the pipeline runs out of the box.
-- **Failure probability** comes from an XGBoost binary classifier.
-- **Health score (0–100)** is a non-linear transform of failure probability.
-- **Risk level**: HEALTHY (<15% failure probability), WARNING (15–50%), CRITICAL (>50%).
-- **Failure type** is predicted by a secondary RandomForest classifier, only surfaced when
-  failure probability ≥ 50% — the system does not claim a failure type or exact failure time it
-  cannot support.
+| Service | Username | Password |
+|---|---|---|
+| Dashboard (Admin) | `admin` | `password123` |
+| Dashboard (Technician) | `tech1` | `password123` |
+| PostgreSQL | `machinesense` | `machinesense` |
 
-## Testing
+---
 
-- **ML service**: `cd ml-service && python train.py` prints accuracy/precision/recall/F1/ROC-AUC
-  on a held-out test split. `python -c "import predict_api"` and hit `/predict` with `curl` or
-  the Flask test client to sanity-check responses.
-- **Backend**: `mvn test` (add unit tests under `src/test/java` as needed for your grading
-  rubric — the service layer is structured so each service can be tested in isolation with
-  mocked repositories).
-- **End-to-end**: run `docker compose up --build`, watch simulator logs
-  (`docker compose logs -f sensor-simulator`) to confirm HTTP 200s, then confirm the dashboard
-  updates live and tickets appear under **Maintenance Tickets** once a machine goes into
-  WARNING/CRITICAL.
+## Team
 
-## Team split suggestion (4-member college team)
-
-1. **Backend/DB** — Spring Boot APIs, security, PostgreSQL schema
-2. **ML** — training pipeline, prediction API, model evaluation
-3. **Frontend** — React dashboard, charts, UX polish
-4. **DevOps** — Docker, Kubernetes, simulator, integration testing, README/demo script
+| Role | Responsibility |
+|---|---|
+| Backend & Database | Spring Boot API, PostgreSQL schema, JWT security, sensor ingestion pipeline, Telegram alerts |
+| Machine Learning | Model training (XGBoost + Random Forest), Flask prediction API, dataset processing |
+| Frontend | React dashboard, live charts, ticket management UI, dark industrial design |
+| DevOps & Simulator | Docker, Kubernetes, sensor simulator, integration, deployment |
